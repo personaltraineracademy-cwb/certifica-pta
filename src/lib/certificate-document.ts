@@ -22,12 +22,14 @@ export type CertificateDocumentSource = {
   templateMime: string | null;
   templateConfig: CertificateTemplateConfig;
   pdfData: Buffer;
+  pdfStoragePath?: string | null;
 };
 
 export async function getCertificateDocument(
   source: CertificateDocumentSource,
   baseUrl: string,
 ) {
+  if (source.pdfStoragePath) return downloadPrivateFile(source.pdfStoragePath);
   if (source.pdfData.length > 0) return source.pdfData;
 
   const templateBackground = source.templateStoragePath

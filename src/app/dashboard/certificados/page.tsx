@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -16,27 +15,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getDb } from "@/db";
-import { certificates, events, registrations } from "@/db/schema";
+import type { Certificate, Event, Registration } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { findRecords, listRecords } from "@/lib/firestore-data";
 
 export default async function CertificatesPage() {
   const { organization } = await requireOrganization();
-  const rows = await getDb()
-    .select({
-      id: certificates.id,
-      code: certificates.publicCode,
-      name: certificates.displayedName,
-      status: certificates.status,
-      issuedAt: certificates.issuedAt,
-      eventName: events.name,
-    })
-    .from(certificates)
-    .innerJoin(registrations, eq(registrations.id, certificates.registrationId))
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .where(eq(events.organizationId, organization.id))
-    .orderBy(desc(certificates.issuedAt))
-    .limit(100);
+  const [events, registrations, certificates] = await Promise.all([
+    findRecords<Event>("events", { organizationId: organization.id }),
+    listRecords<Registration>("registrations"),
+    listRecords<Certificate>("certificates"),
+  ]);
+  const eventById = new Map(events.map((event) => [event.id, event]));
+  const registrationById = new Map(registrations.filter((item) => eventById.has(item.eventId)).map((item) => [item.id, item]));
+  const rows = certificates
+    .filter((item) => registrationById.has(item.registrationId))
+    .sort((a, b) => b.issuedAt.getTime() - a.issuedAt.getTime())
+    .slice(0, 100)
+    .map((item) => ({ id: item.id, code: item.publicCode, name: item.displayedName, status: item.status, issuedAt: item.issuedAt, eventName: eventById.get(registrationById.get(item.registrationId)!.eventId)!.name }));
   return (
     <div className="space-y-7">
       <div>

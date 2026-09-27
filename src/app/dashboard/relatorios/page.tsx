@@ -1,4 +1,3 @@
-import { desc, eq, sql } from "drizzle-orm";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,24 +7,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getDb } from "@/db";
-import { events, registrations } from "@/db/schema";
+import type { Event, Registration } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { findRecords, listRecords } from "@/lib/firestore-data";
 
 export default async function ReportsPage() {
   const { organization } = await requireOrganization();
-  const rows = await getDb()
-    .select({
-      id: events.id,
-      name: events.name,
-      startsAt: events.startsAt,
-      participants: sql<number>`count(${registrations.id})::int`,
-    })
-    .from(events)
-    .leftJoin(registrations, eq(registrations.eventId, events.id))
-    .where(eq(events.organizationId, organization.id))
-    .groupBy(events.id)
-    .orderBy(desc(events.createdAt));
+  const [events, registrations] = await Promise.all([
+    findRecords<Event>("events", { organizationId: organization.id }),
+    listRecords<Registration>("registrations"),
+  ]);
+  const counts = new Map<string, number>();
+  for (const item of registrations) counts.set(item.eventId, (counts.get(item.eventId) ?? 0) + 1);
+  const rows = events.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).map((event) => ({ ...event, participants: counts.get(event.id) ?? 0 }));
   return (
     <div className="space-y-7">
       <div>

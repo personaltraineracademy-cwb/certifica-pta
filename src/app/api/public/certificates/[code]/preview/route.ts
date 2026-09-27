@@ -1,50 +1,15 @@
-import { and, eq } from "drizzle-orm";
-import { getDb } from "@/db";
-import {
-  certificates,
-  certificateTemplates,
-  events,
-  registrations,
-} from "@/db/schema";
+import type { Certificate } from "@/db/schema";
 import { getCertificateDocument } from "@/lib/certificate-document";
+import { getCertificateSource } from "@/lib/certificate-source";
+import { findRecords } from "@/lib/firestore-data";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ code: string }> },
 ) {
   const { code } = await params;
-  const db = getDb();
-  const [certificate] = await db
-    .select({
-      pdfData: certificates.pdfData,
-      displayedName: certificates.displayedName,
-      issuedAt: certificates.issuedAt,
-      publicCode: certificates.publicCode,
-      eventName: events.name,
-      eventEdition: events.edition,
-      issuerName: events.issuerName,
-      workloadHours: events.workloadHours,
-      individualWorkloadHours: registrations.individualWorkloadHours,
-      startsAt: events.startsAt,
-      endsAt: events.endsAt,
-      signatoryName: events.signatoryName,
-      signatoryRole: events.signatoryRole,
-      templateBackground: certificateTemplates.backgroundData,
-      templateStoragePath: certificateTemplates.backgroundStoragePath,
-      templateMime: certificateTemplates.backgroundMime,
-      templateConfig: certificateTemplates.config,
-    })
-    .from(certificates)
-    .innerJoin(registrations, eq(registrations.id, certificates.registrationId))
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .innerJoin(certificateTemplates, eq(certificateTemplates.id, certificates.templateId))
-    .where(
-      and(
-        eq(certificates.publicCode, code.toUpperCase()),
-        eq(certificates.status, "valid"),
-      ),
-    )
-    .limit(1);
+  const [stored] = await findRecords<Certificate & { pdfStoragePath?: string | null }>("certificates", { publicCode: code.toUpperCase(), status: "valid" });
+  const certificate = stored ? await getCertificateSource(stored) : null;
 
   if (!certificate) {
     return Response.json({ error: "Certificado não disponível." }, { status: 404 });

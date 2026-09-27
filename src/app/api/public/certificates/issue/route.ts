@@ -1,19 +1,10 @@
 import { createHash } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/db";
-import {
-  accessSessions,
-  auditLogs,
-  certificates,
-  certificateTemplates,
-  events,
-  organizations,
-  registrations,
-} from "@/db/schema";
+import type { Certificate, CertificateTemplate, Event, Registration } from "@/db/schema";
 import { generateCertificatePdf } from "@/lib/pdf";
-import { downloadPrivateFile } from "@/lib/firebase-storage";
+import { downloadPrivateFile, uploadPrivateFile } from "@/lib/firebase-storage";
+import { findRecords, getRecord, writeBatch } from "@/lib/firestore-data";
 import { createCertificateCode, hashValue, requestContextHash } from "@/lib/security";
 
 const inputSchema = z.object({
@@ -35,52 +26,26 @@ export async function POST(request: NextRequest) {
   const token = request.cookies.get("certifica_access")?.value;
   if (!token) return Response.json({ error: "Acesso expirado." }, { status: 401 });
 
-  const db = getDb();
-  const [access] = await db
-    .select({
-      sessionId: accessSessions.id,
-      registrationId: registrations.id,
-      eventId: events.id,
-      eventName: events.name,
-      eventEdition: events.edition,
-      startsAt: events.startsAt,
-      endsAt: events.endsAt,
-      workloadHours: events.workloadHours,
-      individualWorkloadHours: registrations.individualWorkloadHours,
-      issuerName: events.issuerName,
-      signatoryName: events.signatoryName,
-      signatoryRole: events.signatoryRole,
-      organizationId: organizations.id,
-      templateId: certificateTemplates.id,
-      templateBackground: certificateTemplates.backgroundData,
-      templateStoragePath: certificateTemplates.backgroundStoragePath,
-      templateMime: certificateTemplates.backgroundMime,
-      templateConfig: certificateTemplates.config,
-    })
-    .from(accessSessions)
-    .innerJoin(registrations, eq(registrations.id, accessSessions.registrationId))
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .innerJoin(organizations, eq(organizations.id, events.organizationId))
-    .innerJoin(
-      certificateTemplates,
-      and(eq(certificateTemplates.eventId, events.id), eq(certificateTemplates.isPublished, true)),
-    )
-    .where(
-      and(
-        eq(accessSessions.tokenHash, hashValue(token)),
-        eq(accessSessions.registrationId, parsed.data.registrationId),
-        gt(accessSessions.expiresAt, new Date()),
-      ),
-    )
-    .limit(1);
+  const [session] = await findRecords<{ id: string; registrationId: string; expiresAt: Date }>("access_sessions", { tokenHash: hashValue(token), registrationId: parsed.data.registrationId });
+  const registration = session ? await getRecord<Registration>("registrations", session.registrationId) : null;
+  const event = registration ? await getRecord<Event>("events", registration.eventId) : null;
+  const templates = event ? await findRecords<CertificateTemplate>("certificate_templates", { eventId: event.id, isPublished: true }) : [];
+  const template = templates.sort((a, b) => b.version - a.version)[0];
+  const access = session && session.expiresAt > new Date() && registration && event && template ? {
+    sessionId: session.id, registrationId: registration.id, eventId: event.id,
+    eventName: event.name, eventEdition: event.edition, startsAt: event.startsAt,
+    endsAt: event.endsAt, workloadHours: event.workloadHours,
+    individualWorkloadHours: registration.individualWorkloadHours,
+    issuerName: event.issuerName, signatoryName: event.signatoryName,
+    signatoryRole: event.signatoryRole, organizationId: event.organizationId,
+    templateId: template.id, templateBackground: template.backgroundData,
+    templateStoragePath: template.backgroundStoragePath, templateMime: template.backgroundMime,
+    templateConfig: template.config,
+  } : null;
 
   if (!access) return Response.json({ error: "Acesso inválido ou expirado." }, { status: 401 });
 
-  const [existing] = await db
-    .select({ publicCode: certificates.publicCode })
-    .from(certificates)
-    .where(and(eq(certificates.registrationId, access.registrationId), eq(certificates.status, "valid")))
-    .limit(1);
+  const [existing] = await findRecords<Certificate>("certificates", { registrationId: access.registrationId, status: "valid" });
   if (existing) {
     return Response.json({
       code: existing.publicCode,
@@ -115,34 +80,15 @@ export async function POST(request: NextRequest) {
   });
   const documentHash = createHash("sha256").update(pdf).digest("hex");
 
-  await db.transaction(async (tx) => {
-    const [certificate] = await tx
-      .insert(certificates)
-      .values({
-        registrationId: access.registrationId,
-        templateId: access.templateId,
-        publicCode,
-        displayedName: parsed.data.displayName,
-        issuedAt,
-        pdfData: Buffer.alloc(0),
-        documentHash,
-      })
-      .returning({ id: certificates.id });
-    await tx
-      .update(registrations)
-      .set({ confirmedName: parsed.data.displayName, eligibility: "issued", updatedAt: issuedAt })
-      .where(eq(registrations.id, access.registrationId));
-    await tx.update(accessSessions).set({ usedAt: issuedAt }).where(eq(accessSessions.id, access.sessionId));
-    await tx.insert(auditLogs).values({
-      organizationId: access.organizationId,
-      actorId: "participant",
-      entityType: "certificate",
-      entityId: certificate.id,
-      action: "certificate.issued",
-      after: { publicCode, displayedName: parsed.data.displayName },
-      contextHash: requestContextHash(request),
-    });
-  });
+  const certificateId = crypto.randomUUID();
+  const pdfStoragePath = `certifica/certificates/${certificateId}.pdf`;
+  await uploadPrivateFile(pdfStoragePath, pdf, "application/pdf");
+  await writeBatch([
+    { collection: "certificates", id: certificateId, data: { id: certificateId, registrationId: access.registrationId, templateId: access.templateId, publicCode, status: "valid", version: 1, displayedName: parsed.data.displayName, issuedAt, pdfStoragePath, documentHash } },
+    { collection: "registrations", id: access.registrationId, data: { confirmedName: parsed.data.displayName, eligibility: "issued", updatedAt: issuedAt } },
+    { collection: "access_sessions", id: access.sessionId, data: { usedAt: issuedAt } },
+    { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: access.organizationId, actorId: "participant", entityType: "certificate", entityId: certificateId, action: "certificate.issued", after: { publicCode, displayedName: parsed.data.displayName }, contextHash: requestContextHash(request), createdAt: issuedAt } },
+  ]);
 
   return Response.json({
     code: publicCode,

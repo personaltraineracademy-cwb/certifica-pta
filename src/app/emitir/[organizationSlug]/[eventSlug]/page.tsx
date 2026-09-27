@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
@@ -11,8 +10,8 @@ import {
 import { Brand } from "@/components/brand";
 import { CertificateAccessFlow } from "@/components/certificate-access-flow";
 import { Badge } from "@/components/ui/badge";
-import { getDb } from "@/db";
-import { events, organizations } from "@/db/schema";
+import type { Event } from "@/db/schema";
+import { findRecords } from "@/lib/firestore-data";
 
 export const metadata: Metadata = { title: "Emitir certificado" };
 
@@ -22,24 +21,9 @@ export default async function EventIssuePage({
   params: Promise<{ organizationSlug: string; eventSlug: string }>;
 }) {
   const { organizationSlug, eventSlug } = await params;
-  const db = getDb();
-  const [event] = await db
-    .select({
-      name: events.name,
-      startsAt: events.startsAt,
-      workloadHours: events.workloadHours,
-      organizationName: organizations.name,
-    })
-    .from(events)
-    .innerJoin(organizations, eq(organizations.id, events.organizationId))
-    .where(
-      and(
-        eq(organizations.slug, organizationSlug),
-        eq(events.slug, eventSlug),
-        eq(events.status, "published"),
-      ),
-    )
-    .limit(1);
+  const [organization] = await findRecords<{ id: string; name: string; slug: string }>("organizations", { slug: organizationSlug });
+  const [storedEvent] = organization ? await findRecords<Event>("events", { organizationId: organization.id, slug: eventSlug, status: "published" }) : [];
+  const event = storedEvent && { ...storedEvent, organizationName: organization!.name };
 
   if (!event) notFound();
 

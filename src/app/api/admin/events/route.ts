@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { auditLogs, certificateTemplates, events } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { writeBatch } from "@/lib/firestore-data";
 
 const eventSchema = z.object({
   name: z.string().trim().min(3).max(140),
@@ -41,35 +40,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const db = getDb();
   const slug = `${slugify(parsed.data.name)}-${Date.now().toString(36).slice(-6)}`;
-  const event = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(events)
-      .values({
-        organizationId: organization.id,
-        slug,
-        ...parsed.data,
-      })
-      .returning();
-
-    await tx
-      .insert(certificateTemplates)
-      .values({ eventId: created.id, version: 1 });
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "event",
-      entityId: created.id,
-      action: "event.created",
-      after: { name: created.name, slug },
-    });
-
-    return created;
-  });
+  const eventId = crypto.randomUUID();
+  const templateId = crypto.randomUUID();
+  const now = new Date();
+  await writeBatch([
+    { collection: "events", id: eventId, data: { id: eventId, organizationId: organization.id, slug, status: "draft", ...parsed.data, createdAt: now, updatedAt: now } },
+    { collection: "certificate_templates", id: templateId, data: { id: templateId, eventId, version: 1, config: {}, isPublished: false, createdAt: now } },
+    { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "event", entityId: eventId, action: "event.created", after: { name: parsed.data.name, slug }, createdAt: now } },
+  ]);
 
   return NextResponse.redirect(
-    new URL(`/dashboard/eventos/${event.id}`, request.url),
+    new URL(`/dashboard/eventos/${eventId}`, request.url),
     303,
   );
 }

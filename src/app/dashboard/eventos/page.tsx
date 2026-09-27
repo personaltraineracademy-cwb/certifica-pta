@@ -1,14 +1,13 @@
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
 import { CalendarRange, CheckCircle2, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { DeleteEventButton } from "@/components/delete-event-button";
-import { getDb } from "@/db";
-import { events, registrations } from "@/db/schema";
+import type { Event } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { findRecords, listRecords } from "@/lib/firestore-data";
 
 export default async function EventsPage({
   searchParams,
@@ -19,22 +18,17 @@ export default async function EventsPage({
     requireOrganization(),
     searchParams,
   ]);
-  const db = getDb();
-  const rows = await db
-    .select({
-      id: events.id,
-      name: events.name,
-      edition: events.edition,
-      status: events.status,
-      startsAt: events.startsAt,
-      modality: events.modality,
-      participants: sql<number>`count(${registrations.id})::int`,
-    })
-    .from(events)
-    .leftJoin(registrations, eq(registrations.eventId, events.id))
-    .where(eq(events.organizationId, organization.id))
-    .groupBy(events.id)
-    .orderBy(desc(events.createdAt));
+  const [eventRows, registrationRows] = await Promise.all([
+    findRecords<Event>("events", { organizationId: organization.id }),
+    listRecords<{ id: string; eventId: string }>("registrations"),
+  ]);
+  const participantCounts = new Map<string, number>();
+  for (const registration of registrationRows) {
+    participantCounts.set(registration.eventId, (participantCounts.get(registration.eventId) ?? 0) + 1);
+  }
+  const rows = eventRows
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .map((event) => ({ ...event, participants: participantCounts.get(event.id) ?? 0 }));
 
   return (
     <div className="space-y-7">

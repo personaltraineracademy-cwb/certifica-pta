@@ -309,3 +309,4 @@ export const auditLogs = pgTable(
 export type Event = typeof events.$inferSelect;
 export type Registration = typeof registrations.$inferSelect;
 export type Certificate = typeof certificates.$inferSelect;
+export type CertificateTemplate = typeof certificateTemplates.$inferSelect;

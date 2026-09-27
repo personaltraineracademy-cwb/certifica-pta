@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { desc, eq, sql } from "drizzle-orm";
 import {
   ArrowRight,
   CalendarRange,
@@ -16,47 +15,32 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { getDb } from "@/db";
-import {
-  certificateDownloads,
-  certificates,
-  events,
-  registrations,
-} from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { findRecords, listRecords } from "@/lib/firestore-data";
+import type { Event } from "@/db/schema";
 
 export default async function DashboardPage() {
   const { organization } = await requireOrganization();
-  const db = getDb();
-  const [stats, recentEvents] = await Promise.all([
-    db
-      .select({
-        events: sql<number>`count(distinct ${events.id})::int`,
-        participants: sql<number>`count(distinct ${registrations.id})::int`,
-        certificates: sql<number>`count(distinct ${certificates.id})::int`,
-        downloads: sql<number>`count(distinct ${certificateDownloads.id})::int`,
-      })
-      .from(events)
-      .leftJoin(registrations, eq(registrations.eventId, events.id))
-      .leftJoin(certificates, eq(certificates.registrationId, registrations.id))
-      .leftJoin(
-        certificateDownloads,
-        eq(certificateDownloads.certificateId, certificates.id),
-      )
-      .where(eq(events.organizationId, organization.id)),
-    db
-      .select()
-      .from(events)
-      .where(eq(events.organizationId, organization.id))
-      .orderBy(desc(events.createdAt))
-      .limit(5),
+  const [organizationEvents, allRegistrations, allCertificates, allDownloads] = await Promise.all([
+    findRecords<Event>("events", { organizationId: organization.id }),
+    listRecords<{ id: string; eventId: string }>("registrations"),
+    listRecords<{ id: string; registrationId: string }>("certificates"),
+    listRecords<{ id: string; certificateId: string }>("certificate_downloads"),
   ]);
-  const summary = stats[0] ?? {
-    events: 0,
-    participants: 0,
-    certificates: 0,
-    downloads: 0,
+  const eventIds = new Set(organizationEvents.map((event) => event.id));
+  const organizationRegistrations = allRegistrations.filter((item) => eventIds.has(item.eventId));
+  const registrationIds = new Set(organizationRegistrations.map((item) => item.id));
+  const organizationCertificates = allCertificates.filter((item) => registrationIds.has(item.registrationId));
+  const certificateIds = new Set(organizationCertificates.map((item) => item.id));
+  const summary = {
+    events: organizationEvents.length,
+    participants: organizationRegistrations.length,
+    certificates: organizationCertificates.length,
+    downloads: allDownloads.filter((item) => certificateIds.has(item.certificateId)).length,
   };
+  const recentEvents = organizationEvents
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 5);
   const cards = [
     { label: "Eventos", value: summary.events, icon: CalendarRange },
     { label: "Participantes", value: summary.participants, icon: UsersRound },

@@ -1,12 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 import sharp from "sharp";
 import { z } from "zod";
-import { getDb } from "@/db";
-import { auditLogs, certificateTemplates, events } from "@/db/schema";
+import type { CertificateTemplate, Event } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
 import { deletePrivateFile, uploadPrivateFile } from "@/lib/firebase-storage";
+import { findRecords, getRecord, writeBatch } from "@/lib/firestore-data";
 
 const templateConfigSchema = z.object({
   nameY: z.coerce.number().min(20).max(75),
@@ -46,23 +45,12 @@ export async function POST(
   }
 
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [[event], [template]] = await Promise.all([
-    db
-      .select({ id: events.id })
-      .from(events)
-      .where(
-        and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-      )
-      .limit(1),
-    db
-      .select()
-      .from(certificateTemplates)
-      .where(eq(certificateTemplates.eventId, eventId))
-      .orderBy(desc(certificateTemplates.version))
-      .limit(1),
+  const [event, templates] = await Promise.all([
+    getRecord<Event>("events", eventId),
+    findRecords<CertificateTemplate>("certificate_templates", { eventId }),
   ]);
-  if (!event || !template) {
+  const template = templates.sort((a, b) => b.version - a.version)[0];
+  if (!event || event.organizationId !== organization.id || !template) {
     return NextResponse.redirect(
       new URL("/dashboard/eventos", request.url),
       303,
@@ -135,21 +123,10 @@ export async function POST(
   };
 
   try {
-    await db.transaction(async (tx) => {
-      await tx
-      .update(certificateTemplates)
-      .set({ backgroundData, backgroundStoragePath, backgroundMime, backgroundFilename, config })
-      .where(eq(certificateTemplates.id, template.id));
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "certificate_template",
-      entityId: template.id,
-      action: "template.background.updated",
-      before: { filename: template.backgroundFilename },
-      after: { filename: backgroundFilename, config },
-    });
-    });
+    await writeBatch([
+      { collection: "certificate_templates", id: template.id, data: { backgroundData, backgroundStoragePath, backgroundMime, backgroundFilename, config } },
+      { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "certificate_template", entityId: template.id, action: "template.background.updated", before: { filename: template.backgroundFilename }, after: { filename: backgroundFilename, config }, createdAt: new Date() } },
+    ]);
   } catch (error) {
     if (hasNewFile && backgroundStoragePath) {
       await deletePrivateFile(backgroundStoragePath).catch(() => undefined);

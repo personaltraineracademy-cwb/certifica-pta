@@ -1,4 +1,3 @@
-import { desc, eq } from "drizzle-orm";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -15,27 +14,30 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getDb } from "@/db";
-import { events, registrations } from "@/db/schema";
+import type { Event, Registration } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { findRecords, listRecords } from "@/lib/firestore-data";
 
 export default async function ParticipantsPage() {
   const { organization } = await requireOrganization();
-  const rows = await getDb()
-    .select({
-      id: registrations.id,
-      name: registrations.confirmedName,
-      originalName: registrations.originalName,
-      email: registrations.participantEmail,
-      buyerEmail: registrations.buyerEmail,
-      eligibility: registrations.eligibility,
-      eventName: events.name,
-    })
-    .from(registrations)
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .where(eq(events.organizationId, organization.id))
-    .orderBy(desc(registrations.createdAt))
-    .limit(100);
+  const [events, registrations] = await Promise.all([
+    findRecords<Event>("events", { organizationId: organization.id }),
+    listRecords<Registration>("registrations"),
+  ]);
+  const eventById = new Map(events.map((event) => [event.id, event]));
+  const rows = registrations
+    .filter((item) => eventById.has(item.eventId))
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 100)
+    .map((item) => ({
+      id: item.id,
+      name: item.confirmedName,
+      originalName: item.originalName,
+      email: item.participantEmail,
+      buyerEmail: item.buyerEmail,
+      eligibility: item.eligibility,
+      eventName: eventById.get(item.eventId)!.name,
+    }));
   return (
     <div className="space-y-7">
       <div>

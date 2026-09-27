@@ -1,15 +1,8 @@
-import { and, eq, gt } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { getDb } from "@/db";
-import {
-  accessSessions,
-  certificateDownloads,
-  certificates,
-  certificateTemplates,
-  events,
-  registrations,
-} from "@/db/schema";
+import type { Certificate } from "@/db/schema";
 import { getCertificateDocument } from "@/lib/certificate-document";
+import { getCertificateSource } from "@/lib/certificate-source";
+import { createRecord, findRecords } from "@/lib/firestore-data";
 import { hashValue, requestContextHash } from "@/lib/security";
 
 export async function GET(
@@ -20,47 +13,15 @@ export async function GET(
   const token = request.cookies.get("certifica_access")?.value;
   if (!token) return Response.json({ error: "Acesso expirado." }, { status: 401 });
 
-  const db = getDb();
-  const [certificate] = await db
-    .select({
-      id: certificates.id,
-      pdfData: certificates.pdfData,
-      displayedName: certificates.displayedName,
-      issuedAt: certificates.issuedAt,
-      publicCode: certificates.publicCode,
-      eventName: events.name,
-      eventEdition: events.edition,
-      issuerName: events.issuerName,
-      workloadHours: events.workloadHours,
-      individualWorkloadHours: registrations.individualWorkloadHours,
-      startsAt: events.startsAt,
-      endsAt: events.endsAt,
-      signatoryName: events.signatoryName,
-      signatoryRole: events.signatoryRole,
-      templateBackground: certificateTemplates.backgroundData,
-      templateStoragePath: certificateTemplates.backgroundStoragePath,
-      templateMime: certificateTemplates.backgroundMime,
-      templateConfig: certificateTemplates.config,
-    })
-    .from(certificates)
-    .innerJoin(registrations, eq(registrations.id, certificates.registrationId))
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .innerJoin(certificateTemplates, eq(certificateTemplates.id, certificates.templateId))
-    .innerJoin(accessSessions, eq(accessSessions.registrationId, registrations.id))
-    .where(
-      and(
-        eq(certificates.publicCode, code),
-        eq(certificates.status, "valid"),
-        eq(accessSessions.tokenHash, hashValue(token)),
-        gt(accessSessions.expiresAt, new Date()),
-      ),
-    )
-    .limit(1);
+  const [stored] = await findRecords<Certificate & { pdfStoragePath?: string | null }>("certificates", { publicCode: code, status: "valid" });
+  const [session] = stored ? await findRecords<{ id: string; registrationId: string; expiresAt: Date }>("access_sessions", { registrationId: stored.registrationId, tokenHash: hashValue(token) }) : [];
+  const certificate = stored && session && session.expiresAt > new Date() ? await getCertificateSource(stored) : null;
 
   if (!certificate) return Response.json({ error: "Certificado não disponível." }, { status: 404 });
-  await db.insert(certificateDownloads).values({
+  await createRecord("certificate_downloads", {
     certificateId: certificate.id,
     contextHash: requestContextHash(request),
+    downloadedAt: new Date(),
   });
 
   const pdf = await getCertificateDocument(certificate, new URL(request.url).origin);

@@ -1,40 +1,23 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import Papa from "papaparse";
 import readXlsxFile from "read-excel-file/node";
-import sharp from "sharp";
 import { z } from "zod";
-import { getDb } from "@/db";
-import {
-  auditLogs,
-  certificates,
-  certificateTemplates,
-  events,
-  importBatches,
-  registrations,
-} from "@/db/schema";
+import { registrations } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
 import { normalizeEmail } from "@/lib/security";
 import {
   createRecord,
   findRecords,
+  getRecord,
+  listRecords,
   writeBatch as writeFirestoreBatch,
 } from "@/lib/firestore-data";
 
 const eventNameSchema = z.string().trim().min(3).max(140);
-
-const templateConfigSchema = z.object({
-  nameY: z.coerce.number().min(20).max(75),
-  nameFontSize: z.coerce.number().min(16).max(60),
-  codeX: z.coerce.number().min(2).max(90),
-  codeY: z.coerce.number().min(70).max(97),
-  codeFontSize: z.coerce.number().min(7).max(18),
-  textColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-});
 
 const emailSchema = z.email().max(254);
 
@@ -49,60 +32,24 @@ function participantTicketCode(eventId: string, email: string) {
 export async function deleteEvent(formData: FormData) {
   const eventId = z.uuid().parse(formData.get("eventId"));
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [[event], [{ issuedCertificates }]] = await Promise.all([
-    db
-      .select({ id: events.id, name: events.name, status: events.status })
-      .from(events)
-      .where(
-        and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-      )
-      .limit(1),
-    db
-      .select({ issuedCertificates: count(certificates.id) })
-      .from(certificates)
-      .innerJoin(
-        registrations,
-        eq(registrations.id, certificates.registrationId),
-      )
-      .where(eq(registrations.eventId, eventId)),
+  const event = await getRecord<{ id: string; name: string; status: string; organizationId: string }>("events", eventId);
+  if (!event || event.organizationId !== organization.id) throw new Error("Evento não encontrado");
+  const [eventRegistrations, templates, batches, allCertificates] = await Promise.all([
+    findRecords<{ id: string }>("registrations", { eventId }),
+    findRecords<{ id: string }>("certificate_templates", { eventId }),
+    findRecords<{ id: string }>("import_batches", { eventId }),
+    listRecords<{ id: string; registrationId: string }>("certificates"),
   ]);
-
-  if (!event) throw new Error("Evento não encontrado");
-
-  await db.transaction(async (tx) => {
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "event",
-      entityId: event.id,
-      action: "event.deleted",
-      before: {
-        name: event.name,
-        status: event.status,
-        issuedCertificates,
-      },
-    });
-    await tx
-      .delete(certificates)
-      .where(
-        inArray(
-          certificates.registrationId,
-          tx
-            .select({ id: registrations.id })
-            .from(registrations)
-            .where(eq(registrations.eventId, event.id)),
-        ),
-      );
-    await tx
-      .delete(events)
-      .where(
-        and(
-          eq(events.id, event.id),
-          eq(events.organizationId, organization.id),
-        ),
-      );
-  });
+  const registrationIds = new Set(eventRegistrations.map((item) => item.id));
+  const relatedCertificates = allCertificates.filter((item) => registrationIds.has(item.registrationId));
+  await writeFirestoreBatch([
+    ...eventRegistrations.map((item) => ({ collection: "registrations", id: item.id, delete: true })),
+    ...templates.map((item) => ({ collection: "certificate_templates", id: item.id, delete: true })),
+    ...batches.map((item) => ({ collection: "import_batches", id: item.id, delete: true })),
+    ...relatedCertificates.map((item) => ({ collection: "certificates", id: item.id, delete: true })),
+    { collection: "events", id: eventId, delete: true },
+    { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "event", entityId: eventId, action: "event.deleted", before: { name: event.name, status: event.status, issuedCertificates: relatedCertificates.length }, createdAt: new Date() } },
+  ]);
 
   revalidatePath("/dashboard/eventos");
   revalidatePath("/dashboard");
@@ -117,38 +64,14 @@ export async function updateEventName(formData: FormData) {
   }
 
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [event] = await db
-    .select({ id: events.id, name: events.name })
-    .from(events)
-    .where(
-      and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-    )
-    .limit(1);
-
-  if (!event) throw new Error("Evento não encontrado");
+  const event = await getRecord<{ id: string; name: string; organizationId: string }>("events", eventId);
+  if (!event || event.organizationId !== organization.id) throw new Error("Evento não encontrado");
   if (event.name !== parsedName.data) {
     const now = new Date();
-    await db.transaction(async (tx) => {
-      await tx
-        .update(events)
-        .set({ name: parsedName.data, updatedAt: now })
-        .where(
-          and(
-            eq(events.id, eventId),
-            eq(events.organizationId, organization.id),
-          ),
-        );
-      await tx.insert(auditLogs).values({
-        organizationId: organization.id,
-        actorId: session.userId!,
-        entityType: "event",
-        entityId: eventId,
-        action: "event.name.updated",
-        before: { name: event.name },
-        after: { name: parsedName.data },
-      });
-    });
+    await writeFirestoreBatch([
+      { collection: "events", id: eventId, data: { name: parsedName.data, updatedAt: now } },
+      { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "event", entityId: eventId, action: "event.name.updated", before: { name: event.name }, after: { name: parsedName.data }, createdAt: now } },
+    ]);
   }
 
   revalidatePath(`/dashboard/eventos/${eventId}`);
@@ -165,44 +88,26 @@ export async function addParticipant(formData: FormData) {
     redirect(`/dashboard/eventos/${eventId}?erro=email-invalido`);
   }
 
-  const db = getDb();
-  const [event] = await db
-    .select({ id: events.id })
-    .from(events)
-    .where(
-      and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-    )
-    .limit(1);
-  if (!event) throw new Error("Evento não encontrado");
+  const event = await getRecord<{ id: string; organizationId: string }>("events", eventId);
+  if (!event || event.organizationId !== organization.id) throw new Error("Evento não encontrado");
 
   const ticketCode = participantTicketCode(eventId, email);
-  const [registration] = await db
-    .insert(registrations)
-    .values({
-      eventId,
-      buyerEmail: email,
-      participantEmail: email,
-      ticketCode,
-      eligibility: "eligible",
-    })
-    .onConflictDoUpdate({
-      target: [registrations.eventId, registrations.ticketCode],
-      set: {
-        buyerEmail: email,
-        participantEmail: email,
-        eligibility: sql`case when ${registrations.eligibility} in ('issued', 'revoked') then ${registrations.eligibility} else 'eligible'::eligibility_status end`,
-        updatedAt: new Date(),
-      },
-    })
-    .returning({ id: registrations.id });
-
-  await db.insert(auditLogs).values({
+  const [previous] = await findRecords<{ id: string; eligibility: string }>("registrations", { eventId, ticketCode });
+  const registrationId = previous?.id ?? crypto.randomUUID();
+  const now = new Date();
+  await writeFirestoreBatch([{ collection: "registrations", id: registrationId, data: {
+    id: registrationId, eventId, buyerEmail: email, participantEmail: email, ticketCode,
+    eligibility: previous?.eligibility === "issued" || previous?.eligibility === "revoked" ? previous.eligibility : "eligible",
+    createdAt: previous ? undefined : now, updatedAt: now,
+  } }]);
+  await createRecord("audit_logs", {
     organizationId: organization.id,
     actorId: session.userId!,
     entityType: "registration",
-    entityId: registration.id,
+    entityId: registrationId,
     action: "participant.added_manually",
     after: { emailHash: createHash("sha256").update(email).digest("hex") },
+    createdAt: now,
   });
 
   revalidatePath(`/dashboard/eventos/${eventId}`);
@@ -212,160 +117,26 @@ export async function addParticipant(formData: FormData) {
 export async function publishEvent(formData: FormData) {
   const eventId = z.uuid().parse(formData.get("eventId"));
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [event] = await db
-    .select()
-    .from(events)
-    .where(
-      and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-    )
-    .limit(1);
-  if (!event) throw new Error("Evento não encontrado");
-
-  const [[{ eligible }], [template]] = await Promise.all([
-    db
-      .select({ eligible: count() })
-      .from(registrations)
-      .where(
-        and(
-          eq(registrations.eventId, eventId),
-          eq(registrations.eligibility, "eligible"),
-        ),
-      ),
-    db
-      .select()
-      .from(certificateTemplates)
-      .where(eq(certificateTemplates.eventId, eventId))
-      .limit(1),
+  const event = await getRecord<{ id: string; organizationId: string; supportChannel?: string; status: string }>("events", eventId);
+  if (!event || event.organizationId !== organization.id) throw new Error("Evento não encontrado");
+  const [registrationRows, templates] = await Promise.all([
+    findRecords<{ id: string; eligibility: string }>("registrations", { eventId }),
+    findRecords<{ id: string; version: number; backgroundData?: Buffer; backgroundStoragePath?: string }>("certificate_templates", { eventId }),
   ]);
+  const eligible = registrationRows.filter((item) => item.eligibility === "eligible").length;
+  const template = templates.sort((a, b) => b.version - a.version)[0];
   if (eligible === 0 || !template?.backgroundData || !event.supportChannel) {
     redirect(`/dashboard/eventos/${eventId}?erro=publicacao-incompleta`);
   }
 
   const now = new Date();
-  await db.transaction(async (tx) => {
-    await tx
-      .update(events)
-      .set({ status: "published", publishedAt: now, updatedAt: now })
-      .where(eq(events.id, eventId));
-    await tx
-      .update(certificateTemplates)
-      .set({ isPublished: true })
-      .where(eq(certificateTemplates.id, template.id));
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "event",
-      entityId: eventId,
-      action: "event.published",
-      before: { status: event.status },
-      after: { status: "published" },
-    });
-  });
+  await writeFirestoreBatch([
+    { collection: "events", id: eventId, data: { status: "published", publishedAt: now, updatedAt: now } },
+    { collection: "certificate_templates", id: template.id, data: { isPublished: true } },
+    { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "event", entityId: eventId, action: "event.published", before: { status: event.status }, after: { status: "published" }, createdAt: now } },
+  ]);
   revalidatePath(`/dashboard/eventos/${eventId}`);
   revalidatePath("/dashboard");
-}
-
-export async function uploadCertificateTemplate(formData: FormData) {
-  const eventId = z.uuid().parse(formData.get("eventId"));
-  const file = formData.get("file");
-  const parsedConfig = templateConfigSchema.safeParse(
-    Object.fromEntries(formData),
-  );
-
-  if (!parsedConfig.success) {
-    redirect(`/dashboard/eventos/${eventId}?erro=template-invalido`);
-  }
-
-  const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [[event], [template]] = await Promise.all([
-    db
-      .select({ id: events.id })
-      .from(events)
-      .where(
-        and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-      )
-      .limit(1),
-    db
-      .select()
-      .from(certificateTemplates)
-      .where(eq(certificateTemplates.eventId, eventId))
-      .orderBy(desc(certificateTemplates.version))
-      .limit(1),
-  ]);
-  if (!event || !template) throw new Error("Evento ou template não encontrado");
-
-  const hasNewFile = file instanceof File && file.size > 0;
-  if (!hasNewFile && !template.backgroundData) {
-    redirect(`/dashboard/eventos/${eventId}?erro=template-invalido`);
-  }
-
-  let backgroundData = template.backgroundData;
-  let backgroundMime = template.backgroundMime;
-  let backgroundFilename = template.backgroundFilename;
-
-  if (hasNewFile) {
-    if (
-      file.size > 10 * 1024 * 1024 ||
-      !["image/png", "image/jpeg"].includes(file.type)
-    ) {
-      redirect(`/dashboard/eventos/${eventId}?erro=template-invalido`);
-    }
-
-    try {
-      backgroundData = await sharp(Buffer.from(await file.arrayBuffer()))
-        .rotate()
-        .resize({
-          width: 2400,
-          height: 1800,
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        .flatten({ background: "#ffffff" })
-        .jpeg({ quality: 90, chromaSubsampling: "4:4:4", mozjpeg: true })
-        .toBuffer();
-      backgroundMime = "image/jpeg";
-      backgroundFilename = file.name;
-    } catch {
-      redirect(`/dashboard/eventos/${eventId}?erro=template-invalido`);
-    }
-  }
-
-  const config = {
-    ...template.config,
-    orientation: "landscape" as const,
-    name: {
-      y: parsedConfig.data.nameY,
-      fontSize: parsedConfig.data.nameFontSize,
-      color: parsedConfig.data.textColor,
-    },
-    code: {
-      x: parsedConfig.data.codeX,
-      y: parsedConfig.data.codeY,
-      fontSize: parsedConfig.data.codeFontSize,
-      color: parsedConfig.data.textColor,
-    },
-  };
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(certificateTemplates)
-      .set({ backgroundData, backgroundMime, backgroundFilename, config })
-      .where(eq(certificateTemplates.id, template.id));
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "certificate_template",
-      entityId: template.id,
-      action: "template.background.updated",
-      before: { filename: template.backgroundFilename },
-      after: { filename: backgroundFilename, config },
-    });
-  });
-
-  revalidatePath(`/dashboard/eventos/${eventId}`);
-  redirect(`/dashboard/eventos/${eventId}?aba=template&template=salvo`);
 }
 
 function normalizeHeader(value: unknown) {
@@ -527,35 +298,15 @@ export async function setEligibility(formData: FormData) {
     .enum(["pending", "eligible", "ineligible", "blocked"])
     .parse(formData.get("eligibility"));
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [registration] = await db
-    .select({ id: registrations.id, previous: registrations.eligibility })
-    .from(registrations)
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .where(
-      and(
-        eq(registrations.id, registrationId),
-        eq(registrations.eventId, eventId),
-        eq(events.organizationId, organization.id),
-      ),
-    )
-    .limit(1);
-  if (!registration) throw new Error("Inscrição não encontrada");
-  await db.transaction(async (tx) => {
-    await tx
-      .update(registrations)
-      .set({ eligibility, updatedAt: new Date() })
-      .where(eq(registrations.id, registrationId));
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "registration",
-      entityId: registrationId,
-      action: "eligibility.updated",
-      before: { eligibility: registration.previous },
-      after: { eligibility },
-    });
-  });
+  const [registration, event] = await Promise.all([
+    getRecord<{ id: string; eventId: string; eligibility: string }>("registrations", registrationId),
+    getRecord<{ id: string; organizationId: string }>("events", eventId),
+  ]);
+  if (!registration || registration.eventId !== eventId || !event || event.organizationId !== organization.id) throw new Error("Inscrição não encontrada");
+  await writeFirestoreBatch([
+    { collection: "registrations", id: registrationId, data: { eligibility, updatedAt: new Date() } },
+    { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "registration", entityId: registrationId, action: "eligibility.updated", before: { eligibility: registration.eligibility }, after: { eligibility }, createdAt: new Date() } },
+  ]);
   revalidatePath(`/dashboard/eventos/${eventId}`);
 }
 
@@ -569,44 +320,15 @@ export async function revokeCertificate(formData: FormData) {
     .max(300)
     .parse(formData.get("reason"));
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [certificate] = await db
-    .select({
-      id: certificates.id,
-      registrationId: certificates.registrationId,
-    })
-    .from(certificates)
-    .innerJoin(registrations, eq(registrations.id, certificates.registrationId))
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .where(
-      and(
-        eq(certificates.id, certificateId),
-        eq(events.organizationId, organization.id),
-      ),
-    )
-    .limit(1);
-  if (!certificate) throw new Error("Certificado não encontrado");
-  await db.transaction(async (tx) => {
-    await tx
-      .update(certificates)
-      .set({
-        status: "revoked",
-        revokedAt: new Date(),
-        revocationReason: reason,
-      })
-      .where(eq(certificates.id, certificateId));
-    await tx
-      .update(registrations)
-      .set({ eligibility: "revoked", updatedAt: new Date() })
-      .where(eq(registrations.id, certificate.registrationId));
-    await tx.insert(auditLogs).values({
-      organizationId: organization.id,
-      actorId: session.userId!,
-      entityType: "certificate",
-      entityId: certificateId,
-      action: "certificate.revoked",
-      after: { reason },
-    });
-  });
+  const certificate = await getRecord<{ id: string; registrationId: string }>("certificates", certificateId);
+  const registration = certificate ? await getRecord<{ id: string; eventId: string }>("registrations", certificate.registrationId) : null;
+  const event = registration ? await getRecord<{ id: string; organizationId: string }>("events", registration.eventId) : null;
+  if (!certificate || !registration || registration.eventId !== eventId || !event || event.organizationId !== organization.id) throw new Error("Certificado não encontrado");
+  const now = new Date();
+  await writeFirestoreBatch([
+    { collection: "certificates", id: certificateId, data: { status: "revoked", revokedAt: now, revocationReason: reason } },
+    { collection: "registrations", id: certificate.registrationId, data: { eligibility: "revoked", updatedAt: now } },
+    { collection: "audit_logs", id: crypto.randomUUID(), data: { organizationId: organization.id, actorId: session.userId!, entityType: "certificate", entityId: certificateId, action: "certificate.revoked", after: { reason }, createdAt: now } },
+  ]);
   revalidatePath(`/dashboard/eventos/${eventId}`);
 }

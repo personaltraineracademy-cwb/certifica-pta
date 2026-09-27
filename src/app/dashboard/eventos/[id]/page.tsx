@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { and, count, desc, eq, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
@@ -51,16 +50,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getDb } from "@/db";
-import {
-  certificates,
-  certificateTemplates,
-  events,
-  importBatches,
-  registrations,
-} from "@/db/schema";
+import type { CertificateTemplate, Event } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
-import { findRecords } from "@/lib/firestore-data";
+import { findRecords, getRecord } from "@/lib/firestore-data";
 
 const statusLabel: Record<string, string> = {
   draft: "Rascunho",
@@ -96,23 +88,13 @@ export default async function EventDetailPage({
 }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const { organization } = await requireOrganization();
-  const db = getDb();
-  const [event] = await db
-    .select()
-    .from(events)
-    .where(and(eq(events.id, id), eq(events.organizationId, organization.id)))
-    .limit(1);
-  if (!event) notFound();
+  const event = await getRecord<Event>("events", id);
+  if (!event || event.organizationId !== organization.id) notFound();
 
-  const [firestoreRegistrations, firestoreCertificates, [template], batches] = await Promise.all([
+  const [firestoreRegistrations, firestoreCertificates, templates, batches] = await Promise.all([
     findRecords<Record<string, unknown> & { id: string; eventId: string; createdAt?: Date; eligibility: string }>("registrations", { eventId: id }),
     findRecords<Record<string, unknown> & { id: string; registrationId: string; publicCode?: string; status: string }>("certificates", {}),
-    db
-      .select()
-      .from(certificateTemplates)
-      .where(eq(certificateTemplates.eventId, id))
-      .orderBy(desc(certificateTemplates.version))
-      .limit(1),
+    findRecords<CertificateTemplate>("certificate_templates", { eventId: id }),
     findRecords<{
       id: string;
       eventId: string;
@@ -122,6 +104,7 @@ export default async function EventDetailPage({
       createdAt: Date;
     }>("import_batches", { eventId: id }),
   ]);
+  const template = templates.sort((a, b) => b.version - a.version)[0];
   const certificateByRegistration = new Map(
     firestoreCertificates.filter((item) => item.status === "valid").map((item) => [item.registrationId, item]),
   );

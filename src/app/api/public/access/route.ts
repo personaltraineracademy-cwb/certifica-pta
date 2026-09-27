@@ -1,15 +1,7 @@
-import { and, count, desc, eq, gt, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getDb } from "@/db";
-import {
-  accessAttempts,
-  accessSessions,
-  certificates,
-  events,
-  organizations,
-  registrations,
-} from "@/db/schema";
+import type { Certificate, Event, Registration } from "@/db/schema";
+import { createRecord, findRecords } from "@/lib/firestore-data";
 import {
   createAccessToken,
   hashValue,
@@ -34,17 +26,9 @@ export async function POST(request: Request) {
   const email = normalizeEmail(parsed.data.email);
   const emailHash = hashValue(email);
   const contextHash = requestContextHash(request);
-  const db = getDb();
   const windowStart = new Date(Date.now() - 10 * 60 * 1000);
-  const [{ attempts }] = await db
-    .select({ attempts: count() })
-    .from(accessAttempts)
-    .where(
-      and(
-        eq(accessAttempts.emailHash, emailHash),
-        gt(accessAttempts.createdAt, windowStart),
-      ),
-    );
+  const recentAttempts = await findRecords<{ id: string; createdAt: Date }>("access_attempts", { emailHash });
+  const attempts = recentAttempts.filter((item) => item.createdAt > windowStart).length;
 
   if (attempts >= 10) {
     return NextResponse.json(
@@ -53,61 +37,34 @@ export async function POST(request: Request) {
     );
   }
 
-  const [match] = await db
-    .select({
-      registrationId: registrations.id,
-      eventId: events.id,
-      eventName: events.name,
-      originalName: registrations.originalName,
-      confirmedName: registrations.confirmedName,
-    })
-    .from(registrations)
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .innerJoin(organizations, eq(organizations.id, events.organizationId))
-    .where(
-      and(
-        eq(events.status, "published"),
-        eq(organizations.slug, parsed.data.organizationSlug),
-        eq(events.slug, parsed.data.eventSlug),
-        or(
-          eq(registrations.buyerEmail, email),
-          eq(registrations.participantEmail, email),
-        ),
-        or(
-          eq(registrations.eligibility, "eligible"),
-          eq(registrations.eligibility, "issued"),
-        ),
-      ),
-    )
-    .orderBy(desc(events.startsAt))
-    .limit(1);
+  const [organization] = await findRecords<{ id: string }>("organizations", { slug: parsed.data.organizationSlug });
+  const [event] = organization ? await findRecords<Event>("events", { organizationId: organization.id, slug: parsed.data.eventSlug, status: "published" }) : [];
+  const eventRegistrations = event ? await findRecords<Registration>("registrations", { eventId: event.id }) : [];
+  const registration = eventRegistrations.find((item) =>
+    (item.buyerEmail === email || item.participantEmail === email) &&
+    (item.eligibility === "eligible" || item.eligibility === "issued"),
+  );
+  const match = event && registration ? { registrationId: registration.id, eventId: event.id, eventName: event.name, originalName: registration.originalName, confirmedName: registration.confirmedName } : null;
 
-  await db.insert(accessAttempts).values({
+  await createRecord("access_attempts", {
     eventId: match?.eventId,
     emailHash,
     contextHash,
     successful: Boolean(match),
+    createdAt: new Date(),
   });
 
   if (!match) return NextResponse.json({ ok: false, message: genericMessage });
 
   const token = createAccessToken();
-  await db.insert(accessSessions).values({
+  await createRecord("access_sessions", {
     registrationId: match.registrationId,
     tokenHash: hashValue(token),
     expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    createdAt: new Date(),
   });
 
-  const [existingCertificate] = await db
-    .select({ publicCode: certificates.publicCode })
-    .from(certificates)
-    .where(
-      and(
-        eq(certificates.registrationId, match.registrationId),
-        eq(certificates.status, "valid"),
-      ),
-    )
-    .limit(1);
+  const [existingCertificate] = await findRecords<Certificate>("certificates", { registrationId: match.registrationId, status: "valid" });
 
   const response = NextResponse.json({
     ok: true,

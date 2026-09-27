@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { and, eq } from "drizzle-orm";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -16,13 +15,8 @@ import { Brand } from "@/components/brand";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { getDb } from "@/db";
-import {
-  certificates,
-  events,
-  organizations,
-  registrations,
-} from "@/db/schema";
+import type { Certificate, Event, Registration } from "@/db/schema";
+import { findRecords, getRecord } from "@/lib/firestore-data";
 
 export const metadata: Metadata = { title: "Resultado da validação" };
 
@@ -32,26 +26,11 @@ export default async function ValidationResultPage({
   params: Promise<{ code: string }>;
 }) {
   const { code } = await params;
-  const db = getDb();
-  const [result] = await db
-    .select({
-      status: certificates.status,
-      code: certificates.publicCode,
-      name: certificates.displayedName,
-      issuedAt: certificates.issuedAt,
-      eventName: events.name,
-      startsAt: events.startsAt,
-      endsAt: events.endsAt,
-      workloadHours: events.workloadHours,
-      individualWorkloadHours: registrations.individualWorkloadHours,
-      organizationName: organizations.name,
-    })
-    .from(certificates)
-    .innerJoin(registrations, eq(registrations.id, certificates.registrationId))
-    .innerJoin(events, eq(events.id, registrations.eventId))
-    .innerJoin(organizations, eq(organizations.id, events.organizationId))
-    .where(and(eq(certificates.publicCode, code.toUpperCase())))
-    .limit(1);
+  const [certificate] = await findRecords<Certificate>("certificates", { publicCode: code.toUpperCase() });
+  const registration = certificate ? await getRecord<Registration>("registrations", certificate.registrationId) : null;
+  const event = registration ? await getRecord<Event>("events", registration.eventId) : null;
+  const organization = event ? await getRecord<{ id: string; name: string }>("organizations", event.organizationId) : null;
+  const result = certificate && registration && event && organization ? { status: certificate.status, code: certificate.publicCode, name: certificate.displayedName, issuedAt: certificate.issuedAt, eventName: event.name, startsAt: event.startsAt, endsAt: event.endsAt, workloadHours: event.workloadHours, individualWorkloadHours: registration.individualWorkloadHours, organizationName: organization.name } : null;
 
   const valid = result?.status === "valid";
   return (
