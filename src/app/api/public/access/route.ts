@@ -27,8 +27,16 @@ export async function POST(request: Request) {
   const emailHash = hashValue(email);
   const contextHash = requestContextHash(request);
   const windowStart = new Date(Date.now() - 10 * 60 * 1000);
-  const recentAttempts = await findRecords<{ id: string; createdAt: Date }>("access_attempts", { emailHash });
-  const attempts = recentAttempts.filter((item) => item.createdAt > windowStart).length;
+  const recentAttempts = await findRecords<{
+    id: string;
+    createdAt: Date;
+    contextHash?: string;
+  }>("access_attempts", { emailHash });
+  const attempts = recentAttempts.filter(
+    (item) =>
+      item.createdAt > windowStart &&
+      item.contextHash === contextHash,
+  ).length;
 
   if (attempts >= 10) {
     return NextResponse.json(

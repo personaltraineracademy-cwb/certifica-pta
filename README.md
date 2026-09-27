@@ -7,8 +7,8 @@ Produção: [certifica-kohl.vercel.app](https://certifica-kohl.vercel.app)
 ## Stack
 
 - Next.js 16, React 19, TypeScript e Tailwind CSS
-- Clerk para autenticação e organizações
-- Neon Postgres com Drizzle ORM
+- Firebase Authentication para acesso administrativo
+- Cloud Firestore e Firebase Storage para dados e arquivos privados
 - `pdf-lib` e QR Code para geração dos certificados
 - Vercel para execução e deploy
 
@@ -18,17 +18,10 @@ As variáveis de ambiente ficam em `.env.local` e não entram no Git.
 
 ```bash
 npm install
-npm run db:setup
 npm run dev
 ```
 
 Abra `http://localhost:3000`.
-
-## Credenciais da demonstração
-
-- Evento: `summit-curitiba-2026`
-- E-mail: `ana@example.com`
-- Ingresso: `CERT-2026-001`
 
 ## Comandos
 
@@ -36,15 +29,13 @@ Abra `http://localhost:3000`.
 npm run lint
 npm test
 npm run build
-npm run db:migrate
-npm run db:seed
 ```
 
 ## Segurança do MVP
 
-- Área administrativa protegida por usuário e organização do Clerk.
+- Área administrativa protegida pelo Firebase Authentication e por organização.
 - Todas as consultas administrativas são isoladas por organização.
-- Emissão pública exige e-mail mais código individual do ingresso.
+- Emissão pública exige o e-mail cadastrado no evento.
 - Sessão pública curta em cookie `HttpOnly`.
 - Certificados usam códigos aleatórios longos; PDF privado exige sessão válida.
 - Validação pública não expõe e-mail, ingresso ou listas de participantes.

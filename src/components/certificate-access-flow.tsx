@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  ArrowRight,
   CheckCircle2,
   Download,
   Loader2,
@@ -10,6 +11,7 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -105,10 +107,11 @@ export function CertificateAccessFlow({
 
   if (issued) {
     return (
-      <Card className="border-green-200 shadow-xl shadow-brand-navy/5">
+      <FlowShell step={3}>
+      <Card className="animate-page-enter border-green-200 shadow-xl shadow-brand-navy/5">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 grid size-14 place-items-center rounded-full bg-green-50 text-semantic-success">
-            <CheckCircle2 className="size-7" />
+          <div className="mx-auto mb-2 grid size-16 place-items-center rounded-full bg-green-50 text-semantic-success ring-8 ring-green-50/60">
+            <CheckCircle2 className="size-8" />
           </div>
           <Badge className="mx-auto bg-semantic-success">
             Certificado disponível
@@ -117,7 +120,7 @@ export function CertificateAccessFlow({
           <CardDescription>{registration?.eventName}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Button asChild size="lg" className="h-12 w-full">
+          <Button asChild size="lg" className="h-14 w-full text-base">
             <a href={issued.downloadUrl}>
               <Download className="size-4" /> Baixar certificado em PDF
             </a>
@@ -130,12 +133,14 @@ export function CertificateAccessFlow({
           </p>
         </CardContent>
       </Card>
+      </FlowShell>
     );
   }
 
   if (registration) {
     return (
-      <Card className="border-brand-blue-border shadow-xl shadow-brand-navy/5">
+      <FlowShell step={2}>
+      <Card className="animate-page-enter border-brand-blue-border shadow-xl shadow-brand-navy/5">
         <CardHeader>
           <Badge variant="secondary" className="w-fit text-brand-navy">
             Participação confirmada
@@ -160,6 +165,9 @@ export function CertificateAccessFlow({
               value={displayName}
               onChange={(event) => setDisplayName(event.target.value)}
               maxLength={120}
+              autoComplete="name"
+              autoFocus
+              className="h-13 text-base"
             />
           </div>
           <Alert>
@@ -172,7 +180,7 @@ export function CertificateAccessFlow({
           </Alert>
           <Button
             size="lg"
-            className="h-12 w-full"
+            className="h-14 w-full text-base"
             disabled={loading || displayName.trim().length < 3}
             onClick={issueCertificate}
           >
@@ -181,7 +189,7 @@ export function CertificateAccessFlow({
             ) : (
               <CheckCircle2 className="size-4" />
             )}{" "}
-            Gerar certificado
+            Gerar meu certificado <ArrowRight />
           </Button>
           <Button
             variant="ghost"
@@ -192,14 +200,16 @@ export function CertificateAccessFlow({
           </Button>
         </CardContent>
       </Card>
+      </FlowShell>
     );
   }
 
   return (
-    <Card className="border-border shadow-xl shadow-brand-navy/5">
+    <FlowShell step={1}>
+    <Card className="animate-page-enter border-border shadow-xl shadow-brand-navy/5">
       <CardHeader>
-        <div className="mb-2 grid size-10 place-items-center rounded-xl bg-brand-blue-soft text-brand-blue-accessible">
-          <LockKeyhole className="size-5" />
+        <div className="mb-2 grid size-12 place-items-center rounded-2xl bg-brand-blue-soft text-brand-blue-accessible">
+          <LockKeyhole className="size-6" />
         </div>
         <CardTitle className="text-2xl">Acesse seu certificado</CardTitle>
         <CardDescription>
@@ -222,14 +232,18 @@ export function CertificateAccessFlow({
               name="email"
               type="email"
               autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              inputMode="email"
               placeholder="voce@exemplo.com"
+              className="h-13 text-base"
               required
             />
           </div>
           <Button
             type="submit"
             size="lg"
-            className="h-12 w-full"
+            className="h-14 w-full text-base"
             disabled={loading}
           >
             {loading ? (
@@ -237,7 +251,7 @@ export function CertificateAccessFlow({
             ) : (
               <Search className="size-4" />
             )}{" "}
-            Consultar certificado
+            Buscar meu certificado <ArrowRight />
           </Button>
         </form>
         <div className="mt-5 flex items-start gap-2 rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">
@@ -247,5 +261,34 @@ export function CertificateAccessFlow({
         </div>
       </CardContent>
     </Card>
+    </FlowShell>
+  );
+}
+
+function FlowShell({ step, children }: { step: 1 | 2 | 3; children: ReactNode }) {
+  const labels = ["Identificar", "Confirmar", "Baixar"];
+  return (
+    <section className="w-full" aria-label={`Etapa ${step} de 3: ${labels[step - 1]}`}>
+      <div className="mb-4 grid grid-cols-3 gap-2 px-1">
+        {labels.map((label, index) => {
+          const number = index + 1;
+          const complete = number < step;
+          const active = number === step;
+          return (
+            <div key={label} className="min-w-0">
+              <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-border">
+                <div
+                  className={`h-full origin-left rounded-full bg-primary transition-transform duration-500 ${number <= step ? "scale-x-100" : "scale-x-0"}`}
+                />
+              </div>
+              <p className={`truncate text-center text-[11px] font-semibold sm:text-xs ${active ? "text-brand-blue-accessible" : complete ? "text-semantic-success" : "text-muted-foreground"}`}>
+                {complete ? "✓ " : `${number}. `}{label}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      {children}
+    </section>
   );
 }

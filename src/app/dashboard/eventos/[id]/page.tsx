@@ -142,7 +142,7 @@ export default async function EventDetailPage({
       hasTemplateBackground,
     ].filter(Boolean).length * 25;
   return (
-    <div className="space-y-7">
+    <div className="space-y-6 sm:space-y-7">
       <Link
         className="flex w-fit items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
         href="/dashboard/eventos"
@@ -151,7 +151,7 @@ export default async function EventDetailPage({
       </Link>
       <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <Badge
               className={
                 event.status === "published" ? "bg-semantic-success" : ""
@@ -160,7 +160,7 @@ export default async function EventDetailPage({
             >
               {statusLabel[event.status]}
             </Badge>
-            <span className="font-mono text-xs text-muted-foreground">
+            <span className="max-w-full truncate font-mono text-xs text-muted-foreground">
               /{event.slug}
             </span>
           </div>
@@ -170,15 +170,15 @@ export default async function EventDetailPage({
             {event.workloadHours} horas
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex">
           {event.status === "published" && (
-            <Button asChild variant="outline">
+            <Button asChild variant="outline" className="w-full">
               <Link href={`/emitir/${organization.slug}/${event.slug}`}>
                 <Globe2 className="size-4" /> Página de emissão
               </Link>
             </Button>
           )}
-          <Button asChild variant="outline">
+          <Button asChild variant="outline" className="w-full">
             <a href={`/api/admin/events/${event.id}/report`}>
               <Download className="size-4" /> Exportar
             </a>
@@ -256,7 +256,7 @@ export default async function EventDetailPage({
           </AlertDescription>
         </Alert>
       )}
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         <Summary icon={UsersRound} label="Participantes" value={stats.total} />
         <Summary icon={ShieldCheck} label="Elegíveis" value={stats.eligible} />
         <Summary icon={FileBadge2} label="Emitidos" value={stats.issued} />
@@ -269,7 +269,7 @@ export default async function EventDetailPage({
         }
         className="space-y-5"
       >
-        <TabsList>
+        <TabsList className="w-full">
           <TabsTrigger value="participants">Participantes</TabsTrigger>
           <TabsTrigger value="import">Importar</TabsTrigger>
           <TabsTrigger value="template">Certificado</TabsTrigger>
@@ -302,7 +302,7 @@ export default async function EventDetailPage({
                     required
                   />
                 </div>
-                <Button type="submit">
+                <Button type="submit" className="w-full sm:w-auto">
                   <UserPlus className="size-4" /> Adicionar participante
                 </Button>
               </form>
@@ -592,9 +592,9 @@ function Summary({
       <CardContent className="flex items-center justify-between py-5">
         <div>
           <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-semibold">{value}</p>
+          <p className="mt-1 text-xl font-semibold sm:text-2xl">{value}</p>
         </div>
-        <Icon className="size-5 text-brand-blue-accessible" />
+        <Icon className="hidden size-5 text-brand-blue-accessible sm:block" />
       </CardContent>
     </Card>
   );

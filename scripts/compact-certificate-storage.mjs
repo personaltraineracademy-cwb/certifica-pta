@@ -14,7 +14,11 @@ const backupPath = path.join(process.cwd(), '.secrets', 'certificate-records.jso
 await fs.writeFile(
   backupPath,
   `${JSON.stringify({
-    certificates: certificates.map(({ pdf_data: _pdfData, ...record }) => record),
+    certificates: certificates.map((certificate) => {
+      const record = { ...certificate };
+      delete record.pdf_data;
+      return record;
+    }),
     downloads,
   }, null, 2)}\n`,
 );

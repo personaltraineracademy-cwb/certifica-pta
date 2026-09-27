@@ -135,6 +135,7 @@
   body {
     @apply bg-background text-foreground;
     text-rendering: optimizeLegibility;
+    background-image: radial-gradient(circle at 80% 0%, rgb(0 121 253 / 0.055), transparent 28rem);
   }
   html {
     @apply font-sans;
@@ -144,6 +145,32 @@
   h3,
   h4 {
     @apply font-heading;
+  }
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes soft-pulse {
+  50% { opacity: 0.58; }
+}
+
+.animate-page-enter {
+  animation: page-enter 360ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+[data-slot="skeleton"] {
+  animation: soft-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 
