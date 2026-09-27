@@ -23,10 +23,15 @@ export function FirebaseSignInForm() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
       });
-      if (!response.ok) throw new Error("Conta sem acesso ao painel.");
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "Falha ao iniciar sessão");
+      }
       window.location.assign("/dashboard");
-    } catch {
-      setError("E-mail ou senha inválidos.");
+    } catch (error) {
+      setError(error instanceof Error && error.message === "Falha ao iniciar sessão"
+        ? "Não foi possível iniciar a sessão. Tente novamente."
+        : "E-mail ou senha inválidos.");
     } finally { setLoading(false); }
   }
   return (
