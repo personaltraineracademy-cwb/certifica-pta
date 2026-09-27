@@ -1,0 +1,10 @@
+.git
+.agents
+.secrets
+.env*
+.clerk
+.next
+node_modules
+output
+tmp
+*.tsbuildinfo
