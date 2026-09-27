@@ -40,21 +40,21 @@ export default async function EventIssuePage({
           <ArrowLeft className="size-4" /> Início
         </Link>
       </div>
-      <div className="mx-auto grid max-w-6xl gap-7 px-4 pb-12 pt-6 sm:px-5 sm:pt-9 lg:grid-cols-[.85fr_1.15fr] lg:gap-12 lg:px-8 lg:pt-16">
-        <section className="rounded-3xl bg-background/70 p-1 backdrop-blur-sm lg:pt-5">
+      <div className="mx-auto grid max-w-6xl gap-5 px-4 pb-10 pt-5 sm:px-5 md:grid-cols-[.82fr_1.18fr] md:items-start md:gap-8 md:pt-10 lg:gap-12 lg:px-8 lg:pt-14">
+        <section className="rounded-3xl bg-background/70 p-1 backdrop-blur-sm md:sticky md:top-24 lg:pt-3">
           <Badge
             variant="outline"
             className="border-brand-blue-border bg-brand-blue-soft text-brand-blue-accessible"
           >
             Emissão exclusiva deste evento
           </Badge>
-          <h1 className="mt-4 text-[2rem] font-semibold leading-[1.08] tracking-[-.045em] text-brand-navy sm:mt-5 sm:text-5xl">
+          <h1 className="mt-3 text-[1.75rem] font-semibold leading-[1.08] tracking-[-.045em] text-brand-navy sm:text-3xl lg:mt-5 lg:text-5xl">
             {event.name}
           </h1>
-          <p className="mt-3 text-sm font-medium text-muted-foreground">
+          <p className="mt-2 text-sm font-medium text-muted-foreground">
             {event.organizationName}
           </p>
-          <div className="mt-5 flex flex-wrap gap-2 text-sm text-muted-foreground sm:mt-7 sm:gap-3">
+          <div className="mt-4 flex flex-wrap gap-2 text-sm text-muted-foreground lg:mt-7 lg:gap-3">
             <span className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
               <CalendarDays className="size-4 text-brand-blue-accessible" />
               {event.startsAt.toLocaleDateString("pt-BR")}
@@ -63,11 +63,11 @@ export default async function EventIssuePage({
               {event.workloadHours} horas
             </span>
           </div>
-          <p className="mt-5 max-w-md text-sm leading-6 text-muted-foreground sm:mt-7 sm:text-base sm:leading-7">
+          <p className="mt-7 hidden max-w-md text-base leading-7 text-muted-foreground lg:block">
             Informe o e-mail usado neste evento. A busca fica restrita aos
             participantes desta edição.
           </p>
-          <div className="mt-5 hidden space-y-4 text-sm sm:block lg:mt-8">
+          <div className="mt-8 hidden space-y-4 text-sm lg:block">
             <p className="flex gap-3">
               <CircleCheck className="size-5 shrink-0 text-brand-blue-accessible" />
               O evento já está definido pelo endereço desta página.
