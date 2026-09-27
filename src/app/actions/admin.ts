@@ -125,7 +125,11 @@ export async function publishEvent(formData: FormData) {
   ]);
   const eligible = registrationRows.filter((item) => item.eligibility === "eligible").length;
   const template = templates.sort((a, b) => b.version - a.version)[0];
-  if (eligible === 0 || !template?.backgroundData || !event.supportChannel) {
+  if (
+    eligible === 0 ||
+    (!template?.backgroundData && !template?.backgroundStoragePath) ||
+    !event.supportChannel
+  ) {
     redirect(`/dashboard/eventos/${eventId}?erro=publicacao-incompleta`);
   }
 
