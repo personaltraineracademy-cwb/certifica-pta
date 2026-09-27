@@ -1,0 +1,30 @@
+# dependencies
+/node_modules
+
+# Next.js
+/.next
+/out
+
+# local environment variables
+.env*
+!.env.example
+/.secrets/
+
+# Vercel linkage
+.vercel
+
+# local build and temporary files
+/tmp
+/output
+*.tsbuildinfo
+
+# system files
+.DS_Store
+Thumbs.db
+
+# clerk configuration (can include secrets)
+/.clerk/
+
+# local agent configuration
+/.agents/
+/skills-lock.json

@@ -1,0 +1,162 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Inter", "Inter Fallback", "Segoe UI", Arial, sans-serif;
+  --font-mono:
+    "IBM Plex Mono", "IBM Plex Mono Fallback", ui-monospace, monospace;
+  --font-heading: "Manrope", "Manrope Fallback", "Segoe UI", Arial, sans-serif;
+  --color-brand-blue: #0079fd;
+  --color-brand-blue-accessible: #0063d6;
+  --color-brand-blue-soft: #eaf4ff;
+  --color-brand-blue-border: #a8d3ff;
+  --color-brand-navy: #002433;
+  --color-brand-offwhite: #fcfcfa;
+  --color-semantic-success: #158a5b;
+  --color-semantic-error: #c93f45;
+  --color-semantic-warning: #c98512;
+  --color-semantic-info: #276cd6;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --background: #f5f6f4;
+  --foreground: #20211e;
+  --card: #ffffff;
+  --card-foreground: #20211e;
+  --popover: #ffffff;
+  --popover-foreground: #20211e;
+  --primary: #0063d6;
+  --primary-foreground: #ffffff;
+  --secondary: #e9ebe8;
+  --secondary-foreground: #002433;
+  --muted: #f5f6f4;
+  --muted-foreground: #6c7169;
+  --accent: #eaf4ff;
+  --accent-foreground: #002433;
+  --destructive: #c93f45;
+  --border: #d6d9d4;
+  --input: #d6d9d4;
+  --ring: #0079fd;
+  --chart-1: #0079fd;
+  --chart-2: #285f70;
+  --chart-3: #7656d8;
+  --chart-4: #158a5b;
+  --chart-5: #c98512;
+  --radius: 0.625rem;
+  --sidebar: #002433;
+  --sidebar-foreground: #fcfcfa;
+  --sidebar-primary: #0079fd;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #0a3a4a;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #154a5c;
+  --sidebar-ring: #3d99ff;
+}
+
+.dark {
+  --background: #001922;
+  --foreground: #fcfcfa;
+  --card: #042f3f;
+  --card-foreground: #fcfcfa;
+  --popover: #042f3f;
+  --popover-foreground: #fcfcfa;
+  --primary: #3d99ff;
+  --primary-foreground: #001922;
+  --secondary: #0a3a4a;
+  --secondary-foreground: #fcfcfa;
+  --muted: #0a3a4a;
+  --muted-foreground: #a1bac3;
+  --accent: #154a5c;
+  --accent-foreground: #fcfcfa;
+  --destructive: #e46a70;
+  --border: #154a5c;
+  --input: #285f70;
+  --ring: #3d99ff;
+  --chart-1: #3d99ff;
+  --chart-2: #76b8ff;
+  --chart-3: #7656d8;
+  --chart-4: #39b982;
+  --chart-5: #e46a70;
+  --sidebar: #001922;
+  --sidebar-foreground: #fcfcfa;
+  --sidebar-primary: #3d99ff;
+  --sidebar-primary-foreground: #001922;
+  --sidebar-accent: #0a3a4a;
+  --sidebar-accent-foreground: #fcfcfa;
+  --sidebar-border: #154a5c;
+  --sidebar-ring: #3d99ff;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    text-rendering: optimizeLegibility;
+  }
+  html {
+    @apply font-sans;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-heading;
+  }
+}
+
+::selection {
+  background: #d5e9ff;
+  color: #002433;
+}
+
+.certificate-grid {
+  background-image:
+    linear-gradient(to right, rgb(0 121 253 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(0 121 253 / 0.07) 1px, transparent 1px);
+  background-size:
+    40px 40px,
+    40px 40px;
+}
