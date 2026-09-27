@@ -185,7 +185,8 @@ export default async function EventDetailPage({
           </Button>
         </div>
       </div>
-      {query.erro === "publicacao-incompleta" && (
+      {event.status !== "published" &&
+        query.erro === "publicacao-incompleta" && (
         <Alert variant="destructive">
           <AlertTitle>Publicação bloqueada</AlertTitle>
           <AlertDescription>
@@ -193,7 +194,7 @@ export default async function EventDetailPage({
             elegível.
           </AlertDescription>
         </Alert>
-      )}
+        )}
       {query.erro === "template-invalido" && (
         <Alert variant="destructive">
           <AlertTitle>Template inválido</AlertTitle>
