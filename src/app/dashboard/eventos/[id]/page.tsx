@@ -172,13 +172,13 @@ export default async function EventDetailPage({
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
           {event.status === "published" && (
-            <Button asChild variant="outline" className="w-full">
+            <Button asChild variant="outline" className="w-full sm:w-auto">
               <Link href={`/emitir/${organization.slug}/${event.slug}`}>
                 <Globe2 className="size-4" /> Página de emissão
               </Link>
             </Button>
           )}
-          <Button asChild variant="outline" className="w-full">
+          <Button asChild variant="outline" className="w-full sm:w-auto">
             <a href={`/api/admin/events/${event.id}/report`}>
               <Download className="size-4" /> Exportar
             </a>
