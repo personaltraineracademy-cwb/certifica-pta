@@ -60,6 +60,7 @@ import {
   registrations,
 } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
+import { findRecords } from "@/lib/firestore-data";
 
 const statusLabel: Record<string, string> = {
   draft: "Rascunho",
@@ -103,51 +104,50 @@ export default async function EventDetailPage({
     .limit(1);
   if (!event) notFound();
 
-  const [participantRows, [stats], [template], batches] = await Promise.all([
-    db
-      .select({
-        id: registrations.id,
-        name: registrations.confirmedName,
-        originalName: registrations.originalName,
-        email: registrations.participantEmail,
-        buyerEmail: registrations.buyerEmail,
-        eligibility: registrations.eligibility,
-        certificateId: certificates.id,
-        certificateCode: certificates.publicCode,
-        certificateStatus: certificates.status,
-      })
-      .from(registrations)
-      .leftJoin(
-        certificates,
-        and(
-          eq(certificates.registrationId, registrations.id),
-          eq(certificates.status, "valid"),
-        ),
-      )
-      .where(eq(registrations.eventId, id))
-      .orderBy(desc(registrations.createdAt))
-      .limit(100),
-    db
-      .select({
-        total: count(),
-        eligible: sql<number>`count(*) filter (where ${registrations.eligibility} = 'eligible')::int`,
-        issued: sql<number>`count(*) filter (where ${registrations.eligibility} = 'issued')::int`,
-      })
-      .from(registrations)
-      .where(eq(registrations.eventId, id)),
+  const [firestoreRegistrations, firestoreCertificates, [template], batches] = await Promise.all([
+    findRecords<Record<string, unknown> & { id: string; eventId: string; createdAt?: Date; eligibility: string }>("registrations", { eventId: id }),
+    findRecords<Record<string, unknown> & { id: string; registrationId: string; publicCode?: string; status: string }>("certificates", {}),
     db
       .select()
       .from(certificateTemplates)
       .where(eq(certificateTemplates.eventId, id))
       .orderBy(desc(certificateTemplates.version))
       .limit(1),
-    db
-      .select()
-      .from(importBatches)
-      .where(eq(importBatches.eventId, id))
-      .orderBy(desc(importBatches.createdAt))
-      .limit(5),
+    findRecords<{
+      id: string;
+      eventId: string;
+      filename: string;
+      validRows: number;
+      invalidRows: number;
+      createdAt: Date;
+    }>("import_batches", { eventId: id }),
   ]);
+  const certificateByRegistration = new Map(
+    firestoreCertificates.filter((item) => item.status === "valid").map((item) => [item.registrationId, item]),
+  );
+  const participantRows = firestoreRegistrations
+    .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))
+    .slice(0, 100)
+    .map((item) => {
+      const certificate = certificateByRegistration.get(item.id);
+      return {
+        id: item.id,
+        name: item.confirmedName as string | null,
+        originalName: item.originalName as string | null,
+        email: item.participantEmail as string | null,
+        buyerEmail: item.buyerEmail as string,
+        eligibility: item.eligibility,
+        certificateId: certificate?.id ?? null,
+        certificateCode: certificate?.publicCode ?? null,
+        certificateStatus: certificate?.status ?? null,
+      };
+    });
+  const stats = {
+    total: firestoreRegistrations.length,
+    eligible: firestoreRegistrations.filter((item) => item.eligibility === "eligible").length,
+    issued: firestoreRegistrations.filter((item) => item.eligibility === "issued").length,
+  };
+  batches.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).splice(5);
   const hasTemplateBackground = Boolean(
     template?.backgroundData || template?.backgroundStoragePath,
   );

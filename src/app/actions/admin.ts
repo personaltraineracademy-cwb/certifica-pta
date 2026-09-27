@@ -19,6 +19,11 @@ import {
 } from "@/db/schema";
 import { requireOrganization } from "@/lib/auth";
 import { normalizeEmail } from "@/lib/security";
+import {
+  createRecord,
+  findRecords,
+  writeBatch as writeFirestoreBatch,
+} from "@/lib/firestore-data";
 
 const eventNameSchema = z.string().trim().min(3).max(140);
 
@@ -393,14 +398,10 @@ export async function importParticipants(formData: FormData) {
   }
 
   const { session, organization } = await requireOrganization();
-  const db = getDb();
-  const [event] = await db
-    .select({ id: events.id })
-    .from(events)
-    .where(
-      and(eq(events.id, eventId), eq(events.organizationId, organization.id)),
-    )
-    .limit(1);
+  const [event] = await findRecords<{ id: string; organizationId: string }>(
+    "events",
+    { id: eventId, organizationId: organization.id },
+  );
   if (!event) throw new Error("Evento não encontrado");
 
   let rows: Record<string, unknown>[] = [];
@@ -457,43 +458,53 @@ export async function importParticipants(formData: FormData) {
     });
   }
 
-  const [batch] = await db
-    .insert(importBatches)
-    .values({
-      eventId,
-      filename: file.name,
-      totalRows: rows.length,
-      validRows: valid.length,
-      invalidRows,
-      duplicateRows,
-      createdBy: session.userId!,
-    })
-    .returning();
-
-  for (let index = 0; index < valid.length; index += 500) {
-    const chunk = valid
-      .slice(index, index + 500)
-      .map((value) => ({ ...value, importBatchId: batch.id }));
-    await db
-      .insert(registrations)
-      .values(chunk)
-      .onConflictDoUpdate({
-        target: [registrations.eventId, registrations.ticketCode],
-        set: {
-          buyerEmail: sql`excluded.buyer_email`,
-          participantEmail: sql`excluded.participant_email`,
-          eligibility: sql`case when ${registrations.eligibility} in ('issued', 'revoked') then ${registrations.eligibility} else 'eligible'::eligibility_status end`,
-          importBatchId: batch.id,
-          updatedAt: new Date(),
+  const batchId = crypto.randomUUID();
+  const now = new Date();
+  const existing = await findRecords<{
+    id: string;
+    ticketCode: string;
+    eligibility: string;
+  }>("registrations", { eventId });
+  const existingByTicket = new Map(existing.map((item) => [item.ticketCode, item]));
+  await writeFirestoreBatch([
+    {
+      collection: "import_batches",
+      id: batchId,
+      data: {
+        eventId,
+        filename: file.name,
+        totalRows: rows.length,
+        validRows: valid.length,
+        invalidRows,
+        duplicateRows,
+        createdBy: session.userId!,
+        createdAt: now,
+      },
+    },
+    ...valid.map((value) => {
+      const previous = existingByTicket.get(value.ticketCode);
+      return {
+        collection: "registrations",
+        id: previous?.id ?? crypto.randomUUID(),
+        data: {
+          ...value,
+          importBatchId: batchId,
+          eligibility:
+            previous?.eligibility === "issued" || previous?.eligibility === "revoked"
+              ? previous.eligibility
+              : "eligible",
+          createdAt: previous ? undefined : now,
+          updatedAt: now,
         },
-      });
-  }
+      };
+    }),
+  ]);
 
-  await db.insert(auditLogs).values({
+  await createRecord("audit_logs", {
     organizationId: organization.id,
     actorId: session.userId!,
     entityType: "import_batch",
-    entityId: batch.id,
+    entityId: batchId,
     action: "participants.imported",
     after: {
       filenameHash: createHash("sha256").update(file.name).digest("hex"),
@@ -502,6 +513,7 @@ export async function importParticipants(formData: FormData) {
       invalidRows,
       duplicateRows,
     },
+    createdAt: now,
   });
   redirect(
     `/dashboard/eventos/${eventId}?importados=${valid.length}&invalidos=${invalidRows}`,

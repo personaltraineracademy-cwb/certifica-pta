@@ -38,8 +38,18 @@ export async function listRecords<T extends DataValue>(collection: string) {
 }
 
 export async function findRecords<T extends DataValue>(collection: string, filters: Record<string, unknown>) {
+  if (typeof filters.id === "string") {
+    const record = await getRecord<T>(collection, filters.id);
+    if (!record) return [];
+    const matches = Object.entries(filters).every(([key, value]) =>
+      key === "id" || (record as DataValue)[key] === value,
+    );
+    return matches ? [record] : [];
+  }
   let query: FirebaseFirestore.Query = firestore().collection(collectionName(collection));
-  for (const [key, value] of Object.entries(filters)) query = query.where(snake(key), "==", toFirestore(value));
+  for (const [key, value] of Object.entries(filters)) {
+    query = query.where(snake(key), "==", toFirestore(value));
+  }
   const snapshot = await query.get();
   return snapshot.docs.map((doc) => ({ id: doc.id, ...fromFirestore(doc.data()) as DataValue } as unknown as T));
 }
